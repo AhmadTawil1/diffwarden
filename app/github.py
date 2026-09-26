@@ -26,3 +26,16 @@ async def installation_client(installation_id: int) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=API, headers={**HEADERS, "Authorization": f"Bearer {token}"}, timeout=30
     )
+
+
+async def get_all(gh: httpx.AsyncClient, url: str) -> list[dict]:
+    """Paginate a GitHub list endpoint (per_page=100)."""
+    items, page = [], 1
+    while True:
+        r = await gh.get(url, params={"per_page": 100, "page": page})
+        r.raise_for_status()
+        batch = r.json()
+        items.extend(batch)
+        if len(batch) < 100:
+            return items
+        page += 1
