@@ -52,17 +52,19 @@ async def verify(state: ReviewState) -> dict:
     kept = []
     for start in range(0, len(candidates), VERIFY_GROUP):
         group = candidates[start:start + VERIFY_GROUP]
+        # Numbered from 1: the model counts from 1, and ids starting at 0 were sometimes answered as 1.
         prompt = "\n\n".join(
             f"#{i} {c.path}:{c.line} - {c.title}\n{c.explanation}\n"
             f"<code>\n{snippet(files[c.path], c.line, radius=15)}\n</code>"
-            for i, c in enumerate(group)
+            for i, c in enumerate(group, start=1)
         )
         verdicts = {v.id: v for v in await llm.verify(prompt)}
-        for i, c in enumerate(group):
+        for i, c in enumerate(group, start=1):
             v = verdicts.get(i)
             keep = bool(v and v.keep)  # no verdict -> drop
+            reason = v.reason if v else f"no verdict for #{i} (got ids {sorted(verdicts)})"
             log.info("verify %s %s:%d %s | %s", "KEEP" if keep else "DROP", c.path, c.line,
-                     c.title, v.reason if v else "no verdict returned")
+                     c.title, reason)
             if keep:
                 kept.append(c)
     return {"verified": kept}

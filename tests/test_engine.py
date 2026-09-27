@@ -34,3 +34,23 @@ def test_review_batch_skips_a_single_file_that_is_too_large(monkeypatch):
 
     monkeypatch.setattr(llm, "review", always_too_large)
     assert asyncio.run(engine.review_batch({"prompt": batch(1)})) == {"raw_findings": []}
+
+
+def test_verify_numbers_candidates_from_1_and_matches_ids(monkeypatch):
+    from app.schema import Finding, Verdict
+
+    prompts = []
+
+    async def fake_verify(prompt: str):
+        prompts.append(prompt)
+        return [Verdict(id=1, keep=True, reason="real"), Verdict(id=2, keep=False, reason="fake")]
+
+    def finding(line: int) -> Finding:
+        return Finding(path="app/m0.py", start_line=None, line=line, severity="major", category="bug",
+                       confidence=0.9, title=f"t{line}", explanation="e", suggestion=None)
+
+    monkeypatch.setattr(llm, "verify", fake_verify)
+    files = [{"filename": "app/m0.py", "status": "modified", "patch": PATCH}]
+    result = asyncio.run(engine.verify({"files": files, "raw_findings": [finding(1), finding(1)]}))
+    assert prompts[0].startswith("#1 ") and "\n\n#2 " in prompts[0]
+    assert [f.title for f in result["verified"]] == ["t1"]
