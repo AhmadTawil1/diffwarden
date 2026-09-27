@@ -2,15 +2,8 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
 from app.config import settings
+from app.prompts import REVIEW_SYSTEM, VERIFY_SYSTEM
 from app.schema import FINDINGS_SCHEMA, VERDICTS_SCHEMA, Finding, Findings, Verdict, Verdicts
-
-# Placeholders: the real prompts move to app/prompts.py in Task 2.3.
-REVIEW_SYSTEM = (
-    "You are a senior code reviewer. Report only real bugs, security, or performance "
-    "issues on the changed lines. Use the L<number> labels for line numbers. "
-    "Return an empty list if the code is fine."
-)
-VERIFY_SYSTEM = "For each numbered finding, decide if it is a real issue. Return one verdict per id."
 
 # The SDK only reads real env vars, not .env, so pass the key from settings. Retries 429/5xx automatically.
 client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
