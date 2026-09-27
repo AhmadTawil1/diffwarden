@@ -7,9 +7,8 @@ import logging
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
 from app.config import settings
-from app.github import get_all, installation_client
-from app.graph.state import ReviewJob
-from app.render import annotate, filter_files, make_batches
+from app.github import installation_client
+from app.graph.review import ReviewJob, review_graph
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("diffwarden")
@@ -73,17 +72,15 @@ async def run_job(key: str, job: ReviewJob) -> None:
         async with limit:
             gh = await installation_client(job.installation_id)
             try:
-                files = await get_all(gh, f"/repos/{job.owner}/{job.repo}/pulls/{job.pull_number}/files")
+                result = await review_graph.ainvoke({"job": job}, config={"configurable": {"gh": gh}})
             finally:
                 await gh.aclose()
-        kept, skipped = filter_files(files)
-        batches = make_batches([annotate(f) for f in kept])
         log.info(
-            "job %s: %d files kept, %d skipped %s, %d batch(es)",
-            key, len(kept), len(skipped), [f["filename"] for f in skipped], len(batches),
+            "job %s: %d raw, %d verified, %d posted%s",
+            key, len(result.get("raw_findings", [])), len(result.get("verified", [])),
+            len(result["final"]) if not result.get("stale") else 0,
+            " (stale: PR moved on)" if result.get("stale") else "",
         )
-        for i, batch in enumerate(batches):
-            log.info("batch %d:\n%s", i, batch)
     except Exception:
         log.exception("review failed: %s", key)
         seen.discard(key)
