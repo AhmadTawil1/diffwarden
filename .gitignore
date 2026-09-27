@@ -11,3 +11,5 @@ wheels/
 .env
 *.pem
 eval/results/
+
+CLAUDE.md
