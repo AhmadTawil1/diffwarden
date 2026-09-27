@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from functools import partial
 
@@ -7,7 +8,7 @@ from langgraph.types import Send
 from app import llm
 from app.config import settings
 from app.graph.state import BatchInput, ReviewState
-from app.render import annotate, filter_files, make_batches, snippet
+from app.render import annotate, filter_files, make_batches, snippet, split_in_half
 
 log = logging.getLogger("diffwarden")
 VERIFY_GROUP = 20  # candidates per verifier call
@@ -25,8 +26,22 @@ def fan_out(state: ReviewState):
     return [Send("review_batch", {"prompt": p}) for p in state["batches"]]
 
 
+async def _review(prompt: str) -> list:
+    """Review a batch; if the answer is cut off, split it and review the halves in parallel."""
+    try:
+        return await llm.review(prompt)
+    except llm.BatchTooLarge:
+        halves = split_in_half(prompt)
+        if len(halves) == 1:
+            log.warning("review_batch: single file too large to review (%d chars), skipped", len(prompt))
+            return []
+        log.info("review_batch: output cut off at %d chars, splitting in half", len(prompt))
+        results = await asyncio.gather(*(_review(h) for h in halves))
+        return [f for found in results for f in found]
+
+
 async def review_batch(state: BatchInput) -> dict:
-    findings = await llm.review(state["prompt"])
+    findings = await _review(state["prompt"])
     log.info("review_batch: %d chars -> %d finding(s)", len(state["prompt"]), len(findings))
     return {"raw_findings": findings}
 

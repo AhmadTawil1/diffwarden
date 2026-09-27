@@ -56,6 +56,16 @@ def snippet(f: dict, line: int, radius: int = 15) -> str:
     )
 
 
+def split_in_half(prompt: str) -> list[str]:
+    """Split a batch at its middle <file> boundary; a single-file batch comes back as-is."""
+    blocks = prompt.split("\n<file ")
+    blocks = blocks[:1] + ["<file " + b for b in blocks[1:]]
+    if len(blocks) < 2:
+        return [prompt]
+    mid = len(blocks) // 2
+    return ["\n".join(blocks[:mid]), "\n".join(blocks[mid:])]
+
+
 def make_batches(blocks: list[str], max_chars: int = 60_000) -> list[str]:
     """Greedily pack blocks into batches under max_chars; an oversized block goes alone."""
     batches: list[str] = []

@@ -1,7 +1,7 @@
 import re
 
 from app.lines import commentable_lines
-from app.render import annotate, filter_files, make_batches, snippet
+from app.render import annotate, filter_files, make_batches, snippet, split_in_half
 
 PATCH = (
     "@@ -1,3 +1,3 @@\n"
@@ -65,3 +65,15 @@ def test_three_25k_blocks_make_two_batches():
 def test_oversized_block_gets_its_own_batch():
     blocks = ["a" * 10, "b" * 70_000, "c" * 10]
     assert [len(b) for b in make_batches(blocks)] == [10, 70_000, 10]
+
+
+def test_split_in_half_gives_two_files_per_half():
+    batch = "\n".join(annotate(file(f"app/m{i}.py")) for i in range(4))
+    halves = split_in_half(batch)
+    assert [h.count("<file ") for h in halves] == [2, 2]
+    assert "\n".join(halves) == batch
+
+
+def test_split_in_half_leaves_a_single_file_alone():
+    one = annotate(file("app/main.py"))
+    assert split_in_half(one) == [one]
