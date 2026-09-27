@@ -1,6 +1,6 @@
 from pathlib import PurePosixPath
 
-from app.lines import HUNK
+from app.lines import HUNK, new_side_lines
 
 LOCKFILES = {"package-lock.json", "uv.lock"}
 
@@ -44,6 +44,16 @@ def annotate(f: dict) -> str:
         # "\ No newline at end of file" is dropped
     out.append("</file>")
     return "\n".join(out)
+
+
+def snippet(f: dict, line: int, radius: int = 15) -> str:
+    """New-file lines within line ± radius that the patch shows, with >> on `line`."""
+    texts = new_side_lines(f["patch"])
+    return "\n".join(
+        f"{'>>' if n == line else '  '} L{n:<5}{texts[n]}"
+        for n in range(line - radius, line + radius + 1)
+        if n in texts
+    )
 
 
 def make_batches(blocks: list[str], max_chars: int = 60_000) -> list[str]:

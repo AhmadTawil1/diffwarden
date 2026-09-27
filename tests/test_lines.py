@@ -1,4 +1,4 @@
-from app.lines import commentable_lines
+from app.lines import commentable_lines, new_side_lines
 
 
 def test_single_hunk_numbers_added_and_context_lines():
@@ -44,3 +44,14 @@ def test_no_newline_marker_is_ignored():
         "\\ No newline at end of file"
     )
     assert commentable_lines(patch) == {1: 0}
+
+
+def test_new_side_lines_maps_numbers_to_code():
+    patch = (
+        "@@ -5,3 +5,3 @@\n"
+        " keep\n"
+        "-gone\n"
+        "+new\n"
+        " last"
+    )
+    assert new_side_lines(patch) == {5: "keep", 6: "new", 7: "last"}

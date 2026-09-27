@@ -1,7 +1,7 @@
 import re
 
 from app.lines import commentable_lines
-from app.render import annotate, filter_files, make_batches
+from app.render import annotate, filter_files, make_batches, snippet
 
 PATCH = (
     "@@ -1,3 +1,3 @@\n"
@@ -50,6 +50,11 @@ def test_deleted_lines_have_no_label():
     text = annotate(file("app/main.py"))
     deleted = [line for line in text.splitlines() if "b = 2" in line]
     assert deleted == ["      - b = 2"]
+
+
+def test_snippet_marks_the_line_and_stays_within_radius():
+    lines = snippet(file("app/main.py"), line=41, radius=1).splitlines()
+    assert lines == ["   L40   x = 1", ">> L41   y = 2", "   L42   z = 3"]
 
 
 def test_three_25k_blocks_make_two_batches():
