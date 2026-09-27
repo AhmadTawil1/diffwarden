@@ -1,8 +1,17 @@
+import hashlib
+import re
 from pathlib import PurePosixPath
 
+import httpx
+
+from app.github import get_all
 from app.lines import HUNK, new_side_lines
+from app.schema import Finding
 
 LOCKFILES = {"package-lock.json", "uv.lock"}
+SEVERITY_ICON = {"critical": "🔴", "major": "🟠", "minor": "🟡"}
+MARKER = re.compile(r"<!-- diffwarden:fp=([0-9a-f]{40}) -->")
+MENTION = re.compile(r"@(?=\w)")
 
 
 def is_skipped(f: dict) -> bool:
@@ -82,3 +91,53 @@ def make_batches(blocks: list[str], max_chars: int = 60_000) -> list[str]:
     if current:
         batches.append("\n".join(current))
     return batches
+
+
+def fingerprint(f: Finding, line_text: str) -> str:
+    """SHA-1 of path + category + the commented code (whitespace collapsed).
+
+    Uses the code, not the model's wording or the line number, so the same issue
+    keeps the same fingerprint when it is reworded or the code moves down the file.
+    """
+    code = " ".join(line_text.split())
+    return hashlib.sha1(f"{f.path}\n{f.category}\n{code}".encode()).hexdigest()
+
+
+def neutralize(f: Finding) -> Finding:
+    """Stop "@name" in the model's prose from pinging GitHub users.
+
+    The suggestion is left alone: GitHub doesn't turn @ inside code blocks into
+    mentions, and changing it would break code such as decorators when applied.
+    """
+    return f.model_copy(update={
+        "title": MENTION.sub("@\u200b", f.title),
+        "explanation": MENTION.sub("@\u200b", f.explanation),
+    })
+
+
+def render_comment(f: Finding, fp: str) -> str:
+    parts = [
+        f"{SEVERITY_ICON[f.severity]} **{f.title}**",
+        f"`{f.severity}` · `{f.category}`",
+        f.explanation,
+    ]
+    if f.suggestion:
+        fence = "````" if "```" in f.suggestion else "```"
+        parts.append(f"{fence}suggestion\n{f.suggestion}\n{fence}")
+    parts.append(f"<!-- diffwarden:fp={fp} -->")
+    return "\n\n".join(parts)
+
+
+def render_summary(state: dict) -> str:
+    final = state.get("final", [])
+    counts = [f"{n} {s}" for s in SEVERITY_ICON if (n := sum(f.severity == s for f in final))]
+    lines = [f"**DiffWarden** found {len(final)} issue(s): {', '.join(counts) or 'none'}."]
+    if skipped := state.get("skipped"):
+        lines.append("\nNot reviewed (deleted, binary, too large, or generated):")
+        lines += [f"- `{name}`" for name in skipped]
+    return "\n".join(lines)
+
+
+async def existing_fingerprints(gh: httpx.AsyncClient, url: str) -> set[str]:
+    """Fingerprints of comments DiffWarden already posted on this PR."""
+    return {fp for c in await get_all(gh, url) for fp in MARKER.findall(c.get("body") or "")}
