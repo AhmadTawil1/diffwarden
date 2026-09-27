@@ -1,0 +1,17 @@
+@@ -1,9 +1,9 @@
+-def calc(lst, r):
+-    t = 0.0
+-    for x in lst:
+-        t += x["price"] * x["qty"]
+-    return round(t * (1 + r), 2)
++def order_total(lines, tax_rate):
++    subtotal = 0.0
++    for line in lines:
++        subtotal += line["price"] * line["qty"]
++    return round(subtotal * (1 + tax_rate), 2)
+ 
+ 
+-def calc_many(orders, r):
+-    return {o["id"]: calc(o["lines"], r) for o in orders}
++def order_totals(orders, tax_rate):
++    return {order["id"]: order_total(order["lines"], tax_rate) for order in orders}

@@ -1,0 +1,13 @@
+@@ -1,10 +1,6 @@
+ def normalize_tags(raw):
+-    tags = []
+-    for tag in raw:
+-        tag = tag.strip().lower()
+-        if tag and tag not in tags:
+-            tags.append(tag)
+-    return tags
++    cleaned = (tag.strip().lower() for tag in raw)
++    return list(dict.fromkeys(tag for tag in cleaned if tag))
+ 
+ 
+ def tag_counts(posts):

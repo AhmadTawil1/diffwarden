@@ -1,0 +1,28 @@
+@@ -1,14 +1,20 @@
++function lineCents(item) {
++  return Math.round(item.price * item.quantity * 100);
++}
++
++function formatCents(cents) {
++  return `$${(cents / 100).toFixed(2)}`;
++}
++
+ function invoiceLines(items) {
+-  return items.map((item) => {
+-    const cents = Math.round(item.price * item.quantity * 100);
+-    const amount = `$${(cents / 100).toFixed(2)}`;
+-    return `${item.name.padEnd(24)} x${item.quantity} ${amount}`;
+-  });
++  return items.map(
++    (item) => `${item.name.padEnd(24)} x${item.quantity} ${formatCents(lineCents(item))}`,
++  );
+ }
+ 
+ function invoiceTotal(items) {
+-  const cents = items.reduce((sum, item) => sum + Math.round(item.price * item.quantity * 100), 0);
+-  return `Total: $${(cents / 100).toFixed(2)}`;
++  const cents = items.reduce((sum, item) => sum + lineCents(item), 0);
++  return `Total: ${formatCents(cents)}`;
+ }
+ 
+ module.exports = { invoiceLines, invoiceTotal };

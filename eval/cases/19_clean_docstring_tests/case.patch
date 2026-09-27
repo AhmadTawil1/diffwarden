@@ -1,0 +1,29 @@
+@@ -3,12 +3,28 @@ import unicodedata
+ 
+ 
+ def slugify(text):
++    """Turn text into a lowercase, hyphen-separated, ASCII-only slug.
++
++    >>> slugify("Hello World")
++    'hello-world'
++    >>> slugify("  Café -- au lait!  ")
++    'cafe-au-lait'
++    >>> slugify("")
++    ''
++    """
+     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+     text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-")
+     return text.lower()
+ 
+ 
+ def truncate(text, limit):
++    """Shorten text to at most `limit` characters, ending with an ellipsis when cut.
++
++    >>> truncate("short", 10)
++    'short'
++    >>> truncate("a long sentence", 8)
++    'a long…'
++    """
+     if len(text) <= limit:
+         return text
+     return text[: limit - 1].rstrip() + "…"
