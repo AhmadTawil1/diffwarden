@@ -44,7 +44,7 @@ def test_comment_ends_with_the_hidden_marker():
 
 def test_neutralize_breaks_mentions_in_prose_but_not_code():
     f = neutralize(finding(explanation="Ask @octocat.", suggestion="@property"))
-    assert f.explanation == "Ask @​octocat."
+    assert f.explanation == "Ask @\u200boctocat."
     assert f.suggestion == "@property"
 
 
