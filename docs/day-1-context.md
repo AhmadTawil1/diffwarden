@@ -144,7 +144,7 @@ To trigger a job, push a commit to the test PR, or redeliver a webhook from the 
 
 ## What Day 2 changes
 
-- `ReviewJob` moves from `app/main.py` to `app/graph/review.py`.
+- `ReviewJob` moves from `app/main.py` to `app/graph/state.py` (done in 2.4; not `review.py` as the plan says, see Day 2 notes).
 - `run_job` calls `review_graph.ainvoke({"job": job}, config={"configurable": {"gh": gh}})` instead of logging batches. The GitHub client goes in the graph config, not the state.
 - Filtering, annotating, and batching move into the engine's `plan_batches` node; fetching moves into `fetch_files`.
 - New: `app/schema.py`, `app/llm.py`, `app/graph/state.py`, `app/graph/engine.py`, `app/graph/review.py`, plus comment rendering and fingerprints in `app/render.py`.

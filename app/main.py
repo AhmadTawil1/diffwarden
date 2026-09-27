@@ -5,10 +5,10 @@ import json
 import logging
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel
 
 from app.config import settings
 from app.github import get_all, installation_client
+from app.graph.state import ReviewJob
 from app.render import annotate, filter_files, make_batches
 
 logging.basicConfig(level=logging.INFO)
@@ -18,15 +18,6 @@ app = FastAPI(title="DiffWarden")
 # redelivery of a finished commit is a duplicate but a failed one can be retried.
 seen: set[str] = set()
 limit = asyncio.Semaphore(2)
-
-
-# Temporary: moves to app/graph/review.py on Day 2.
-class ReviewJob(BaseModel):
-    installation_id: int
-    owner: str
-    repo: str
-    pull_number: int
-    head_sha: str
 
 
 def verify_signature(body: bytes, signature: str | None) -> bool:
