@@ -87,3 +87,18 @@ def test_sorted_by_severity():
 
 def test_moved_head_marks_stale():
     assert run([finding()], head_sha="newer")["stale"] is True
+
+
+def test_suggestion_longer_than_its_range_is_dropped_but_comment_kept():
+    [f] = run([finding(line=11, suggestion="a = 1\nb = 3")])["final"]
+    assert f.line == 11 and f.suggestion is None
+
+
+def test_suggestion_matching_its_range_is_kept():
+    [f] = run([finding(line=11, suggestion="b = 3")])["final"]
+    assert f.suggestion == "b = 3"
+
+
+def test_suggestion_shorter_than_its_range_is_dropped_but_comment_kept():
+    [f] = run([finding(start_line=10, line=12, suggestion="b = 3")])["final"]
+    assert (f.start_line, f.suggestion) == (10, None)

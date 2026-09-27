@@ -43,6 +43,13 @@ async def validate(state: ReviewState, config: RunnableConfig) -> dict:
                                          or lines[f.start_line] != lines[f.line]):
             # The range is invalid, so the suggestion would replace the wrong lines.
             f = f.model_copy(update={"start_line": None, "suggestion": None})
+        if f.suggestion is not None:
+            span = f.line - (f.start_line or f.line) + 1
+            if len(f.suggestion.splitlines()) != span:
+                # "Commit suggestion" replaces exactly start_line..line. A longer suggestion
+                # usually repeats nearby code (duplicated on apply); a shorter one usually
+                # means the range is too wide (lines deleted on apply). Keep the comment only.
+                f = f.model_copy(update={"suggestion": None})
         fp = fingerprint(f, texts[f.path][f.line])
         if fp in seen:
             continue

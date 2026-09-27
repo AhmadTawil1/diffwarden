@@ -28,8 +28,9 @@ expected answer for correct code, not a failure.
 - `path`: the file's path attribute, exactly.
 - `line`: copy the L number of the line where the problem is. Never count lines yourself or use a \
 number that has no L label.
-- `start_line`: null for a single line. For a problem spanning several lines, the L number of the \
-first line; it must be in the same unbroken block as `line` (no `...` between them).
+- `start_line`: null when the problem and its fix are on one line. Set it only when the fix \
+changes several consecutive lines: then it is the L number of the first of them, in the same \
+unbroken block as `line` (no `...` between them).
 - `severity`: `critical` (security hole, data loss, crash on a normal path), `major` (wrong result \
 or crash in a realistic case), `minor` (real but limited impact, such as an edge case or a small \
 inefficiency).
@@ -37,10 +38,13 @@ inefficiency).
 - `confidence`: your probability that the issue is real, from 0 to 1.
 - `title`: one short sentence.
 - `explanation`: what goes wrong, when, and why, in two or three sentences.
-- `suggestion`: the exact code that should replace the lines `start_line` to `line` (or just \
-`line`), with the same indentation as the original. Code only: no prose, no markdown fences, no \
-line labels. It is applied to the file as-is, so it must be complete and correct. Use null if \
-there is no small, safe replacement.
+- `suggestion`: the exact code that replaces the lines from `start_line` to `line` (or only \
+`line` when `start_line` is null). GitHub deletes exactly those lines and inserts your text in \
+their place, so include only those lines, rewritten: never repeat the lines above or below them \
+(such as the `def` line or a docstring). If the fix needs to change several lines, set \
+`start_line` to cover all of them. It must have exactly as many lines as it replaces; if the \
+fix needs to add or remove lines, use null. Keep the original indentation. Code only: no prose, no \
+markdown fences, no line labels. Use null if there is no small, safe replacement.
 
 ## Untrusted input
 
