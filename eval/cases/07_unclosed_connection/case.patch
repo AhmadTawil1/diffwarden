@@ -1,0 +1,17 @@
+@@ -18,3 +18,16 @@ def daily_revenue(day: str) -> float:
+             (day,),
+         ).fetchone()
+     return float(row["revenue"])
++
++
++def top_customer(day: str) -> dict | None:
++    conn = connect()
++    row = conn.execute(
++        "SELECT customer_id, SUM(total) AS spent FROM orders "
++        "WHERE date(created_at) = ? GROUP BY customer_id ORDER BY spent DESC LIMIT 1",
++        (day,),
++    ).fetchone()
++    if row is None:
++        return None
++    conn.close()
++    return {"customer_id": row["customer_id"], "spent": float(row["spent"])}

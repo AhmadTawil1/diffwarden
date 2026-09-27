@@ -1,0 +1,15 @@
+@@ -15,4 +15,13 @@ async function listCategory(category, page = 1) {
+   );
+ }
+ 
+-module.exports = { findProductById, listCategory };
++async function searchProducts(term, page = 1) {
++  const offset = (page - 1) * PAGE_SIZE;
++  const pattern = `%${term.trim()}%`;
++  return db.query(
++    `SELECT * FROM products WHERE name ILIKE '${pattern}' ORDER BY name LIMIT $1 OFFSET $2`,
++    [PAGE_SIZE, offset],
++  );
++}
++
++module.exports = { findProductById, listCategory, searchProducts };

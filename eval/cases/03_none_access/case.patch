@@ -1,0 +1,15 @@
+@@ -28,3 +28,14 @@ class UserStore:
+ 
+     def all(self) -> list[User]:
+         return list(self._users.values())
++
++
++def shipping_label(store: UserStore, user_id: int) -> str:
++    user = store.get(user_id)
++    if user is None:
++        raise KeyError(f"unknown user {user_id}")
++    return f"{user.name}\n{user.address.street}\n{user.address.city}, {user.address.country}"
++
++
++def users_in_country(store: UserStore, country: str) -> list[User]:
++    return [u for u in store.all() if u.address and u.address.country == country]

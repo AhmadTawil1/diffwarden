@@ -1,0 +1,28 @@
+@@ -13,6 +13,21 @@ async function listOrders(customerId) {
+   );
+ }
+ 
++async function placeOrder(customerId, items) {
++  if (items.length === 0) {
++    throw new Error("an order needs at least one item");
++  }
++  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
++  const rows = await db.query(
++    "INSERT INTO orders (customer_id, total, status) VALUES ($1, $2, 'placed') RETURNING *",
++    [customerId, total],
++  );
++  const order = rows[0];
++  db.query("INSERT INTO order_items (order_id, items) VALUES ($1, $2)", [order.id, JSON.stringify(items)]);
++  await mailer.send(customerId, "order-confirmation", { orderId: order.id });
++  return order;
++}
++
+ async function cancelOrder(id) {
+   const order = await getOrder(id);
+   if (!order) {
+@@ -25,4 +40,4 @@ async function cancelOrder(id) {
+   return { ...order, status: "cancelled" };
+ }
+ 
+-module.exports = { getOrder, listOrders, cancelOrder };
++module.exports = { getOrder, listOrders, placeOrder, cancelOrder };

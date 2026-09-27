@@ -1,0 +1,17 @@
+@@ -22,3 +22,16 @@ class Project:
+                 task.done = True
+                 return
+         raise KeyError(task_id)
++
++
++def percent_complete(project: Project) -> int:
++    """Share of finished tasks as a whole percentage, 0-100."""
++    if not project.tasks:
++        return 0
++    done = len(project.tasks) - len(project.open_tasks())
++    return done // len(project.tasks) * 100
++
++
++def progress_bar(project: Project, width: int = 20) -> str:
++    filled = percent_complete(project) * width // 100
++    return "[" + "#" * filled + "-" * (width - filled) + f"] {percent_complete(project)}%"

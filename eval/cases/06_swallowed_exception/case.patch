@@ -1,0 +1,13 @@
+@@ -28,3 +28,12 @@ class PaymentService:
+             log.info("card declined for order %s", order_id)
+             raise PaymentError("card declined") from exc
+         return Charge(order_id, amount_cents, "paid")
++
++    def refund(self, charge: Charge) -> Charge:
++        if charge.status != "paid":
++            raise PaymentError(f"cannot refund a {charge.status} charge")
++        try:
++            self.gateway.refund(reference=str(charge.order_id), amount=charge.amount_cents)
++        except Exception:
++            pass
++        return Charge(charge.order_id, charge.amount_cents, "refunded")

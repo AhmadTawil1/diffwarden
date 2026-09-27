@@ -1,0 +1,12 @@
+@@ -23,3 +23,11 @@ class Inbox:
+     def mark_all_read(self, user_id: int) -> None:
+         for n in self._items.get(user_id, []):
+             n.read = True
++
++
++def build_digest(notifications: list[Notification], lines: list[str] = []) -> list[str]:
++    """Render unread notifications as bullet lines, appended to any existing lines."""
++    for n in notifications:
++        if not n.read:
++            lines.append(f"- {n.message}")
++    return lines

@@ -1,0 +1,15 @@
+@@ -20,3 +20,14 @@ def can_view(user: User, doc: Document) -> bool:
+     if user.is_suspended:
+         return False
+     return doc.public or user.is_admin or user.id == doc.owner_id
++
++
++def can_edit(user: User, doc: Document) -> bool:
++    """Admins and the document's owner can edit; suspended users never can."""
++    if user.is_suspended:
++        return False
++    return user.is_admin and user.id == doc.owner_id
++
++
++def can_delete(user: User, doc: Document) -> bool:
++    return can_edit(user, doc) and not doc.public

@@ -1,0 +1,30 @@
+@@ -1,20 +1,24 @@
+ FREE_SHIPPING_THRESHOLD = 50.00
+ FLAT_RATE = 4.99
+ EXPRESS_SURCHARGE = 9.99
++HEAVY_WEIGHT_KG = 20
++HEAVY_SURCHARGE = 7.50
+ 
+ 
+ def order_subtotal(lines: list[dict]) -> float:
+     return round(sum(line["price"] * line["quantity"] for line in lines), 2)
+ 
+ 
+-def shipping_cost(subtotal: float, express: bool = False) -> float:
+-    """Orders of 50.00 or more ship free; express always adds a surcharge."""
+-    cost = 0.0 if subtotal >= FREE_SHIPPING_THRESHOLD else FLAT_RATE
++def shipping_cost(subtotal: float, weight_kg: float = 0.0, express: bool = False) -> float:
++    """Orders of 50.00 or more ship free; heavy parcels and express add surcharges."""
++    cost = 0.0 if subtotal > FREE_SHIPPING_THRESHOLD else FLAT_RATE
++    if weight_kg > HEAVY_WEIGHT_KG:
++        cost += HEAVY_SURCHARGE
+     if express:
+         cost += EXPRESS_SURCHARGE
+     return round(cost, 2)
+ 
+ 
+-def order_total(lines: list[dict], express: bool = False) -> float:
++def order_total(lines: list[dict], weight_kg: float = 0.0, express: bool = False) -> float:
+     subtotal = order_subtotal(lines)
+-    return round(subtotal + shipping_cost(subtotal, express), 2)
++    return round(subtotal + shipping_cost(subtotal, weight_kg, express), 2)

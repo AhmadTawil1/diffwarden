@@ -1,0 +1,18 @@
+@@ -11,4 +11,17 @@ router.get("/accounts/:id/balance", async (req, res) => {
+   res.json({ balance: account.balance });
+ });
+ 
++router.post("/transfers", async (req, res) => {
++  const { fromId, toId, amount } = req.body;
++  const from = await accounts.get(fromId);
++  if (!from || from.ownerId !== req.user.id) {
++    return res.status(404).json({ error: "account not found" });
++  }
++  if (from.balance < amount) {
++    return res.status(400).json({ error: "insufficient funds" });
++  }
++  await accounts.move(fromId, toId, amount);
++  res.status(201).json({ ok: true });
++});
++
+ module.exports = router;

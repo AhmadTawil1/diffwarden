@@ -1,0 +1,19 @@
+@@ -22,3 +22,18 @@ def welcome(mailer: Mailer, member: Member) -> None:
+         subject="Welcome to the team",
+         body=f"Hi {member.name}, your account is ready.",
+     )
++
++
++def invite_all(mailer: Mailer, inviter: Member, invitees: list[Member], team: str) -> int:
++    """Email every invitee an invitation from the inviter. Returns how many were sent."""
++    sent = 0
++    for invitee in invitees:
++        if invitee.id == inviter.id:
++            continue
++        mailer.send(
++            to=inviter.email,
++            subject=f"{inviter.name} invited you to {team}",
++            body=f"Hi {invitee.name}, {inviter.name} added you to {team}.",
++        )
++        sent += 1
++    return sent
