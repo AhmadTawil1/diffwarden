@@ -1,5 +1,7 @@
 # DiffWarden
 
+[![tests](https://github.com/AhmadTawil1/diffwarden/actions/workflows/tests.yml/badge.svg)](https://github.com/AhmadTawil1/diffwarden/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 DiffWarden is an AI pull request reviewer that runs as a GitHub App. When a pull request is opened or updated, it reads the diff, asks Claude to find real bugs, security holes, and performance problems, has a second Claude pass double-check each finding, and posts one GitHub review with inline comments on the exact lines, including one-click **Commit suggestion** fixes. It stays quiet on correct code, never repeats a comment on later pushes, and skips draft PRs.
 
 ![DiffWarden demo: a PR with a bug gets an inline review comment, and Commit suggestion applies the fix](docs/demo.gif)
@@ -21,7 +23,7 @@ flowchart LR
     API -. after the response is sent .-> WF[LangGraph review workflow]
 ```
 
-**Review workflow** (generated from the compiled graph with `review_graph.get_graph(xray=True).draw_mermaid()`):
+**Review workflow** (based on the compiled graph, `review_graph.get_graph(xray=True).draw_mermaid()`, with labels edited for readability):
 
 ```mermaid
 flowchart TD

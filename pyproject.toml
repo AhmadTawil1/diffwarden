@@ -1,7 +1,7 @@
 [project]
 name = "diffwarden"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI pull request reviewer: a GitHub App built with FastAPI, LangGraph, and Claude."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
