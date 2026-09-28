@@ -76,7 +76,7 @@ Each run reviews every case once and verifies those same findings, so the verifi
 
 The set is small and synthetic, so treat these numbers as an upper bound; full method and error analysis are in [`eval/RESULTS.md`](eval/RESULTS.md).
 
-End-to-end on GitHub, the deployed app was checked on real PRs: a planted bug gets a comment on the exact line, **Commit suggestion** applies a correct fix, unrelated pushes don't repeat comments, only new bugs are posted on later pushes, and clean PRs get no review.
+End-to-end on GitHub, the deployed app was checked on real PRs: a planted bug gets a comment on the exact line, **Commit suggestion** applies a correct fix, unrelated pushes don't repeat comments, only new bugs are posted on later pushes, and clean PRs get no review. On Vercel, GitHub gets the `202` in about 0.2 s (4.5 s on a cold start, still inside its 10-second limit), and the review is posted about 7 seconds later.
 
 ## Setup
 
@@ -106,6 +106,8 @@ Copy `.env.example` to `.env` and fill it in:
 | `MIN_CONFIDENCE` | `0.7` (findings below this are not posted) |
 | `MAX_COMMENTS` | `15` (per review) |
 | `VERIFY_FINDINGS` | `true` (run the verifier pass) |
+| `INPUT_PRICE_PER_MTOK` | `2.0` (USD per million input tokens, used for cost tracking in the eval) |
+| `OUTPUT_PRICE_PER_MTOK` | `10.0` (USD per million output tokens) |
 
 `.env` is git-ignored; never commit it.
 
@@ -130,12 +132,13 @@ Import the repository at [vercel.com/new](https://vercel.com/new) (Vercel detect
 ### Tests and evals
 
 ```bash
-uv run pytest -q                                         # unit tests, no network or API calls
-uv run python -m eval.run --runs 3                       # 3 eval runs; stops at --max-cost (default $1.00)
+uv run pytest -q                                         # unit tests, no network or API calls (also run in CI)
+uv run python -m eval.run --runs 3                       # 3 eval runs, about $0.35 each
 uv run python -m eval.run --from <stamp>                 # re-score saved runs, no API calls
+uv run python -m eval.run --from <stamp> --rerun <case>  # re-run one case inside saved runs
 ```
 
-Each run reviews every case once and then verifies those same findings, so every verifier/threshold configuration is scored from the same reviewer output. Runs are saved to `eval/results/<stamp>-run<i>.json` and the summary to `<stamp>-summary.json` (git-ignored).
+Each run reviews every case once and then verifies those same findings, so every verifier/threshold configuration is scored from the same reviewer output. Options: `--thresholds 0.5 0.7 0.8` (the default) and `--max-cost` (default `1.00`), which stops starting new cases once that many dollars have been spent. Runs are saved to `eval/results/<stamp>-run<i>.json` and the summary to `<stamp>-summary.json` (git-ignored).
 
 ## Project layout
 
@@ -154,11 +157,13 @@ app/
     engine.py       plan_batches → parallel review_batch → verify
     review.py       fetch_files → engine → validate → post_review
 eval/
-  cases/            20 cases: case.patch + truth.json
+  cases/            28 cases: case.patch + truth.json
   run.py            eval runner and metrics
   RESULTS.md        results and error analysis
 tests/              pytest suite
 scripts/            manual checks (auth, one review, prompts, engine, verifier)
+docs/               demo GIF and build notes
+.github/workflows/  CI: runs the tests on every push and pull request
 ```
 
 ## Security
@@ -174,6 +179,6 @@ scripts/            manual checks (auth, one review, prompts, engine, verifier)
 - **Sees only the diff** and a few context lines, not the whole codebase, so bugs that depend on code elsewhere can be missed.
 - **Reviews run inside the webhook's function invocation** (up to 300 s on Vercel Hobby). If one fails, that commit isn't retried automatically; the next push, or a redelivery from the App's Recent Deliveries page, triggers a new review.
 - **No database.** Commits already processed are remembered only in memory, per instance; posted comments are deduplicated through the fingerprints stored on GitHub.
-- **The verifier costs one more LLM call per review** (more latency and cost) in exchange for fewer false positives.
+- **The verifier costs one more LLM call per review** (about 2 s and 24% more cost). It is meant to cut false positives, but on the eval set it removed nothing because the reviewer made none; its value on noisier real-world diffs is unmeasured. Set `VERIFY_FINDINGS=false` to skip it.
 - **Suggestions that add or remove lines are posted without the Commit suggestion button**, a safety trade-off.
 - **Supports human review; it never blocks merges.**
