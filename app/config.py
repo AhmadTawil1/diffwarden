@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     github_webhook_secret: str
     anthropic_api_key: SecretStr  # SecretStr hides the value in logs and errors
     anthropic_model: str = "claude-sonnet-5"
+    # USD per million tokens for anthropic_model (Sonnet 5 list price); update if the model or pricing changes.
+    input_price_per_mtok: float = 2.0
+    output_price_per_mtok: float = 10.0
     min_confidence: float = 0.7
     max_comments: int = 15
     verify_findings: bool = True

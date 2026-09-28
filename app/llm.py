@@ -1,3 +1,6 @@
+from contextvars import ContextVar
+from dataclasses import dataclass
+
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
@@ -7,6 +10,32 @@ from app.schema import FINDINGS_SCHEMA, VERDICTS_SCHEMA, Finding, Findings, Verd
 
 # The SDK only reads real env vars, not .env, so pass the key from settings. Retries 429/5xx automatically.
 client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+
+
+@dataclass
+class Usage:
+    """Tokens used by Claude calls; output tokens include thinking."""
+
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    @property
+    def cost_usd(self) -> float:
+        return (self.input_tokens * settings.input_price_per_mtok
+                + self.output_tokens * settings.output_price_per_mtok) / 1_000_000
+
+
+# Set by track_usage(). asyncio tasks (including LangGraph's parallel nodes) copy the
+# context, so every call made under one tracker adds to the same Usage object.
+_usage: ContextVar[Usage | None] = ContextVar("llm_usage", default=None)
+
+
+def track_usage() -> Usage:
+    """Start counting tokens for the Claude calls made from the current task onward."""
+    usage = Usage()
+    _usage.set(usage)
+    return usage
 
 
 class BatchTooLarge(Exception):
@@ -25,6 +54,10 @@ async def _structured(system: str, user: str, schema: dict, model: type[BaseMode
         messages=[{"role": "user", "content": user}],
         output_config={"format": {"type": "json_schema", "schema": schema}},
     )
+    if (usage := _usage.get()) is not None:  # counted even if the reply is unusable: it was billed
+        usage.calls += 1
+        usage.input_tokens += res.usage.input_tokens
+        usage.output_tokens += res.usage.output_tokens
     if res.stop_reason == "max_tokens":
         raise BatchTooLarge()  # the JSON is probably cut off
     if res.stop_reason == "refusal":

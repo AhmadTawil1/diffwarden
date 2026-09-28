@@ -121,10 +121,11 @@ Import the repository at [vercel.com/new](https://vercel.com/new) (Vercel detect
 
 ```bash
 uv run pytest -q                                         # unit tests, no network or API calls
-uv run python -m eval.run --verifier on --threshold 0.7  # full eval, about 40 Claude calls
+uv run python -m eval.run --runs 3                       # 3 eval runs; stops at --max-cost (default $1.00)
+uv run python -m eval.run --from <stamp>                 # re-score saved runs, no API calls
 ```
 
-Eval results are saved to `eval/results/<timestamp>.json` (git-ignored).
+Each run reviews every case once and then verifies those same findings, so every verifier/threshold configuration is scored from the same reviewer output. Runs are saved to `eval/results/<stamp>-run<i>.json` and the summary to `<stamp>-summary.json` (git-ignored).
 
 ## Project layout
 
