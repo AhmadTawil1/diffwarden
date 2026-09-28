@@ -40,12 +40,33 @@ def load_cases(cases_dir: Path = CASES_DIR) -> list[dict]:
     return cases
 
 
-def matches(f: Finding, truth: dict) -> bool:
-    """Same file, and the finding's lines overlap the truth range widened by MARGIN."""
-    if truth.get("clean") or f.path != truth["path"]:
+def kind(truth: dict) -> str:
+    """seeded (has bugs), clean (a plain correct refactor), or decoy (correct code that looks wrong)."""
+    return "clean" if truth.get("clean") else "decoy" if truth.get("decoy") else "seeded"
+
+
+def bugs(truth: dict) -> list[dict]:
+    """The planted bugs; single-bug cases keep the short {"start", "end", "category"} form."""
+    if kind(truth) != "seeded":
+        return []
+    if "bugs" in truth:
+        return truth["bugs"]
+    return [{"start": truth["start"], "end": truth["end"], "category": truth["category"]}]
+
+
+def matches(f: Finding, path: str, bug: dict) -> bool:
+    """Same file, and the finding's lines overlap the bug's range widened by MARGIN."""
+    if f.path != path:
         return False
     start = f.start_line or f.line
-    return start <= truth["end"] + MARGIN and f.line >= truth["start"] - MARGIN
+    return start <= bug["end"] + MARGIN and f.line >= bug["start"] - MARGIN
+
+
+def match_findings(findings: list[Finding], truth: dict) -> tuple[list[bool], list[bool]]:
+    """(does each finding hit some bug, was each bug hit by some finding)."""
+    planted = bugs(truth)
+    hits = [[matches(f, truth["path"], b) for b in planted] for f in findings]
+    return [any(h) for h in hits], [any(h[i] for h in hits) for i in range(len(planted))]
 
 
 def keep(findings: list[Finding], patch: str, threshold: float) -> list[Finding]:
@@ -55,16 +76,18 @@ def keep(findings: list[Finding], patch: str, threshold: float) -> list[Finding]
 
 
 def score(results: list[dict]) -> dict:
-    """Recall over seeded cases, precision over all findings, false positives per clean case."""
+    """Recall over planted bugs, precision over all findings, false positives per clean/decoy case."""
     results = [r for r in results if not r["skipped"]]
-    seeded = [r for r in results if not r["truth"].get("clean")]
-    clean = [r for r in results if r["truth"].get("clean")]
+    planted = [hit for r in results for hit in r["bugs_found"]]
+    clean = [r for r in results if kind(r["truth"]) == "clean"]
+    decoy = [r for r in results if kind(r["truth"]) == "decoy"]
     findings = [f for r in results for f in r["findings"]]
     true_pos = [f for f in findings if f["match"]]
     return {
-        "recall": sum(r["found"] for r in seeded) / len(seeded) if seeded else 0.0,
+        "recall": sum(planted) / len(planted) if planted else 0.0,
         "precision": len(true_pos) / len(findings) if findings else 0.0,
         "fp_per_clean": sum(len(r["findings"]) for r in clean) / len(clean) if clean else 0.0,
+        "fp_per_decoy": sum(len(r["findings"]) for r in decoy) / len(decoy) if decoy else 0.0,
         "avg_latency_s": sum(r["latency_s"] for r in results) / len(results) if results else 0.0,
         "avg_cost_usd": sum(r["cost_usd"] for r in results) / len(results) if results else 0.0,
         "total_cost_usd": sum(r["cost_usd"] for r in results),
@@ -111,11 +134,11 @@ def score_config(run: list[dict], cases: dict[str, dict], verifier: bool, thresh
     for c in run:
         case = cases[c["case"]]
         pool = [Finding(**f) for f in c["verified" if verifier else "raw"]]
-        found = [{"match": matches(f, case["truth"])} for f in keep(pool, case["patch"], threshold)]
+        hit, bugs_found = match_findings(keep(pool, case["patch"], threshold), case["truth"])
         steps = [c["review"], c["verify"]] if verifier else [c["review"]]
         results.append({
-            "truth": case["truth"], "skipped": c["skipped"], "error": c["error"], "findings": found,
-            "found": any(f["match"] for f in found),
+            "truth": case["truth"], "skipped": c["skipped"], "error": c["error"],
+            "findings": [{"match": h} for h in hit], "bugs_found": bugs_found,
             "latency_s": sum(s["latency_s"] for s in steps), "cost_usd": sum(s["cost_usd"] for s in steps),
         })
     return score(results)
@@ -172,30 +195,38 @@ def report(runs: list[list[dict]], cases: list[dict], thresholds: list[float], s
             rows.append({"verifier": verifier, "threshold": t, "per_run": per_run,
                          "summary": aggregate(per_run)})
 
-    # Per-case recall at the default threshold: how often each seeded bug was found.
+    # Per case at the default threshold: how often each bug was found, and how many
+    # findings were posted on clean and decoy code (both should be 0).
     t0 = settings.min_confidence if settings.min_confidence in thresholds else thresholds[0]
-    print(f"\nfound per seeded case at threshold {t0} (off / on, out of {len(runs)} runs)")
+    n = len(runs)
+    print(f"\nper case at threshold {t0}, verifier off / on, summed over {n} run(s)")
     for name, case in by_name.items():
-        if case["truth"].get("clean"):
-            continue
-        counts = []
+        per_key = []
         for key in ("raw", "verified"):
-            n = 0
+            found, extra = [0] * len(bugs(case["truth"])), 0
             for run in runs:
                 c = next(c for c in run if c["case"] == name)
-                pool = keep([Finding(**f) for f in c[key]], case["patch"], t0)
-                n += any(matches(f, case["truth"]) for f in pool)
-            counts.append(n)
-        flag = "" if counts == [len(runs)] * 2 else "   <-"
-        print(f"  {name:<28} {counts[0]}/{len(runs)} / {counts[1]}/{len(runs)}{flag}")
+                hit, bugs_found = match_findings(
+                    keep([Finding(**f) for f in c[key]], case["patch"], t0), case["truth"])
+                found = [a + b for a, b in zip(found, bugs_found)]
+                extra += hit.count(False)
+            per_key.append((found, extra))
+        if kind(case["truth"]) == "seeded":
+            text = "  ".join(f"bug{i + 1} {per_key[0][0][i]}/{n} / {per_key[1][0][i]}/{n}"
+                             for i in range(len(per_key[0][0])))
+            flag = any(x < n for x in per_key[0][0] + per_key[1][0])
+        else:
+            text = f"{kind(case['truth'])}: {per_key[0][1]} / {per_key[1][1]} finding(s)"
+            flag = per_key[0][1] + per_key[1][1] > 0
+        print(f"  {name:<30} {text}{'   <-' if flag else ''}")
 
     print(f"\n{len(runs)} run(s); mean (min–max) across runs")
-    print("| Verifier | Threshold | Recall | Precision | FP / clean case | Avg latency | Avg cost |")
-    print("|---|---|---|---|---|---|---|")
+    print("| Verifier | Threshold | Recall | Precision | FP / clean | FP / decoy | Avg latency | Avg cost |")
+    print("|---|---|---|---|---|---|---|---|")
     for r in rows:
         s = r["summary"]
         print(f"| {'on' if r['verifier'] else 'off'} | {r['threshold']} | {_pct(s['recall'])} "
-              f"| {_pct(s['precision'])} | {_num(s['fp_per_clean'])} "
+              f"| {_pct(s['precision'])} | {_num(s['fp_per_clean'])} | {_num(s['fp_per_decoy'])} "
               f"| {s['avg_latency_s']['mean']:.1f}s | ${s['avg_cost_usd']['mean']:.4f} |")
 
     skipped = sum(c["skipped"] for run in runs for c in run)

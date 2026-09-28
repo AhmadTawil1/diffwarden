@@ -2,10 +2,12 @@ import asyncio
 import json
 
 import eval.run as eval_run
-from eval.run import aggregate, keep, load_cases, matches, review_case, score, score_config
+from eval.run import (aggregate, bugs, keep, kind, load_cases, match_findings, matches, review_case,
+                      score, score_config)
 from app.schema import Finding
 
 TRUTH = {"path": "app/items.py", "start": 35, "end": 35, "category": "bug"}
+BUG = {"start": 35, "end": 35, "category": "bug"}
 
 
 def finding(**changes) -> Finding:
@@ -15,12 +17,27 @@ def finding(**changes) -> Finding:
 
 
 def test_match_needs_same_file_and_overlap_within_3_lines():
-    assert matches(finding(line=35), TRUTH)
-    assert matches(finding(line=38), TRUTH)
-    assert not matches(finding(line=39), TRUTH)
-    assert matches(finding(start_line=20, line=32), TRUTH)  # a range reaching into the window
-    assert not matches(finding(path="app/other.py"), TRUTH)
-    assert not matches(finding(), {"path": "app/items.py", "clean": True})
+    assert matches(finding(line=35), "app/items.py", BUG)
+    assert matches(finding(line=38), "app/items.py", BUG)
+    assert not matches(finding(line=39), "app/items.py", BUG)
+    assert matches(finding(start_line=20, line=32), "app/items.py", BUG)  # a range reaching in
+    assert not matches(finding(path="app/other.py"), "app/items.py", BUG)
+
+
+def test_truth_formats():
+    assert bugs(TRUTH) == [BUG]
+    two = {"path": "p", "bugs": [{"start": 1, "end": 2, "category": "bug"},
+                                 {"start": 9, "end": 9, "category": "bug"}]}
+    assert len(bugs(two)) == 2 and kind(two) == "seeded"
+    assert bugs({"path": "p", "clean": True}) == [] and kind({"path": "p", "clean": True}) == "clean"
+    assert bugs({"path": "p", "decoy": True}) == [] and kind({"path": "p", "decoy": True}) == "decoy"
+
+
+def test_match_findings_reports_each_bug_separately():
+    two = {"path": "app/items.py", "bugs": [{"start": 10, "end": 10, "category": "bug"},
+                                            {"start": 40, "end": 40, "category": "bug"}]}
+    hit, found = match_findings([finding(line=10), finding(line=25)], two)
+    assert hit == [True, False] and found == [True, False]
 
 
 def test_keep_drops_non_commentable_and_low_confidence():
@@ -32,23 +49,29 @@ def test_keep_drops_non_commentable_and_low_confidence():
 def test_score():
     base = {"error": None, "skipped": False}
     results = [
-        base | {"truth": TRUTH, "found": True, "latency_s": 2.0, "cost_usd": 0.02,
+        base | {"truth": TRUTH, "bugs_found": [True], "latency_s": 2.0, "cost_usd": 0.02,
                 "findings": [{"match": True}, {"match": False}]},
-        base | {"truth": TRUTH, "found": False, "latency_s": 4.0, "cost_usd": 0.04, "findings": []},
-        base | {"truth": {"path": "x", "clean": True}, "found": False, "latency_s": 3.0,
+        base | {"truth": {"path": "x", "bugs": []}, "bugs_found": [True, False], "latency_s": 4.0,
+                "cost_usd": 0.04, "findings": [{"match": True}]},  # a two-bug case, one found
+        base | {"truth": {"path": "x", "clean": True}, "bugs_found": [], "latency_s": 3.0,
                 "cost_usd": 0.03, "findings": [{"match": False}]},
-        base | {"truth": TRUTH, "found": False, "latency_s": 0.0, "cost_usd": 0.0, "findings": [],
-                "skipped": True},  # skipped by the budget: not counted as a miss
+        base | {"truth": {"path": "x", "decoy": True}, "bugs_found": [], "latency_s": 3.0,
+                "cost_usd": 0.03, "findings": [{"match": False}, {"match": False}]},
+        base | {"truth": TRUTH, "bugs_found": [False], "latency_s": 0.0, "cost_usd": 0.0,
+                "findings": [], "skipped": True},  # skipped by the budget: not counted as a miss
     ]
     m = score(results)
-    assert (m["recall"], m["precision"], m["fp_per_clean"], m["avg_latency_s"]) == (0.5, 1 / 3, 1.0, 3.0)
-    assert round(m["avg_cost_usd"], 6) == 0.03 and round(m["total_cost_usd"], 6) == 0.09
+    assert (m["recall"], m["precision"]) == (2 / 3, 2 / 6)
+    assert (m["fp_per_clean"], m["fp_per_decoy"], m["avg_latency_s"]) == (1.0, 2.0, 3.0)
+    assert round(m["avg_cost_usd"], 6) == 0.03 and round(m["total_cost_usd"], 6) == 0.12
 
 
-def test_all_20_cases_load():
+def test_all_cases_load():
     cases = load_cases()
-    assert len(cases) == 20
-    assert sum(1 for c in cases if c["truth"].get("clean")) == 5
+    kinds = [kind(c["truth"]) for c in cases]
+    assert len(cases) == 28
+    assert (kinds.count("seeded"), kinds.count("clean"), kinds.count("decoy")) == (20, 5, 3)
+    assert sum(len(bugs(c["truth"])) for c in cases) == 22
 
 
 def test_case_is_skipped_once_the_budget_is_spent():

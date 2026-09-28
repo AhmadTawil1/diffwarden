@@ -1,0 +1,23 @@
+@@ -0,0 +1,22 @@
++"""CSV exports for customer support."""
++
++import csv
++import sqlite3
++from pathlib import Path
++
++
++def export_user_orders(db_path: Path, user_id: int, out_dir: Path) -> Path:
++    """Write one user's orders to user_<id>_orders.csv in out_dir and return the file path."""
++    conn = sqlite3.connect(db_path)
++    user = conn.execute("SELECT name, email FROM users WHERE id = ?", (user_id,)).fetchone()
++    rows = conn.execute(
++        "SELECT id, total, created_at FROM orders WHERE user_id = ? ORDER BY created_at",
++        (user_id,),
++    ).fetchall()
++    path = out_dir / f"user_{user_id}_orders.csv"
++    with path.open("w", newline="", encoding="utf-8") as f:
++        writer = csv.writer(f)
++        writer.writerow(["customer", user[0], user[1]])
++        writer.writerow(["order_id", "total", "created_at"])
++        writer.writerows(rows)
++    return path

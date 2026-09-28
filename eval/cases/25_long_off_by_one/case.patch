@@ -1,0 +1,224 @@
+@@ -0,0 +1,223 @@
++"""Metrics helpers for the weekly business report."""
++
++from __future__ import annotations
++
++import math
++from collections import Counter
++from dataclasses import dataclass
++from datetime import date, timedelta
++from statistics import fmean, median
++
++
++@dataclass(frozen=True)
++class DailyPoint:
++    day: date
++    orders: int
++    revenue: float
++    visitors: int
++
++
++# -- ratios --------------------------------------------------------------------
++
++
++def safe_ratio(numerator: float, denominator: float) -> float:
++    return numerator / denominator if denominator else 0.0
++
++
++def conversion_rate(point: DailyPoint) -> float:
++    return safe_ratio(point.orders, point.visitors)
++
++
++def average_order_value(point: DailyPoint) -> float:
++    return safe_ratio(point.revenue, point.orders)
++
++
++def percent_change(old: float, new: float) -> float | None:
++    """Relative change from old to new, or None when old is zero."""
++    if old == 0:
++        return None
++    return (new - old) / abs(old)
++
++
++# -- distributions ---------------------------------------------------------------
++
++
++def percentile(values: list[float], pct: float) -> float:
++    """Linearly interpolated percentile, pct in [0, 100]."""
++    if not values:
++        raise ValueError("percentile of an empty list")
++    if not 0 <= pct <= 100:
++        raise ValueError("pct must be between 0 and 100")
++    ordered = sorted(values)
++    rank = (len(ordered) - 1) * pct / 100
++    low, high = math.floor(rank), math.ceil(rank)
++    if low == high:
++        return ordered[low]
++    return ordered[low] + (ordered[high] - ordered[low]) * (rank - low)
++
++
++def summary_stats(values: list[float]) -> dict[str, float]:
++    if not values:
++        raise ValueError("summary of an empty list")
++    return {
++        "min": min(values),
++        "max": max(values),
++        "mean": fmean(values),
++        "median": median(values),
++        "p90": percentile(values, 90),
++    }
++
++
++def outliers(values: list[float]) -> list[float]:
++    """Values more than 1.5 IQR outside the middle half."""
++    if len(values) < 4:
++        return []
++    q1, q3 = percentile(values, 25), percentile(values, 75)
++    spread = q3 - q1
++    low, high = q1 - 1.5 * spread, q3 + 1.5 * spread
++    return [v for v in values if v < low or v > high]
++
++
++def histogram(values: list[float], buckets: int = 10) -> list[tuple[float, float, int]]:
++    """Equal-width buckets as (low, high, count); the last bucket includes the maximum."""
++    if not values:
++        return []
++    if buckets < 1:
++        raise ValueError("buckets must be at least 1")
++    low, high = min(values), max(values)
++    if low == high:
++        return [(low, high, len(values))]
++    width = (high - low) / buckets
++    counts = Counter(min(int((v - low) / width), buckets - 1) for v in values)
++    return [(low + i * width, low + (i + 1) * width, counts.get(i, 0)) for i in range(buckets)]
++
++
++# -- time series -----------------------------------------------------------------
++
++
++def moving_average(values: list[float], window: int) -> list[float]:
++    """Average of each run of `window` consecutive values, one result per full window."""
++    if window < 1:
++        raise ValueError("window must be at least 1")
++    return [fmean(values[i:i + window]) for i in range(len(values) - window)]
++
++
++def longest_growth_streak(values: list[float]) -> int:
++    """Length of the longest run of strictly increasing consecutive values."""
++    if not values:
++        return 0
++    longest = current = 1
++    for prev, cur in zip(values, values[1:]):
++        current = current + 1 if cur > prev else 1
++        longest = max(longest, current)
++    return longest
++
++
++def fill_missing_days(points: list[DailyPoint]) -> list[DailyPoint]:
++    """Insert zero points for days with no data between the first and last day."""
++    if not points:
++        return []
++    by_day = {p.day: p for p in points}
++    first, last = min(by_day), max(by_day)
++    filled = []
++    day = first
++    while day <= last:
++        filled.append(by_day.get(day, DailyPoint(day, 0, 0.0, 0)))
++        day += timedelta(days=1)
++    return filled
++
++
++def week_start(day: date) -> date:
++    return day - timedelta(days=day.weekday())
++
++
++def weekly_totals(points: list[DailyPoint]) -> dict[date, DailyPoint]:
++    totals: dict[date, DailyPoint] = {}
++    for p in points:
++        start = week_start(p.day)
++        prev = totals.get(start, DailyPoint(start, 0, 0.0, 0))
++        totals[start] = DailyPoint(start, prev.orders + p.orders, prev.revenue + p.revenue,
++                                   prev.visitors + p.visitors)
++    return dict(sorted(totals.items()))
++
++
++def best_day(points: list[DailyPoint]) -> DailyPoint | None:
++    return max(points, key=lambda p: p.revenue, default=None)
++
++
++# -- formatting ------------------------------------------------------------------
++
++
++def format_money(amount: float) -> str:
++    sign = "-" if amount < 0 else ""
++    return f"{sign}${abs(amount):,.2f}"
++
++
++def format_change(ratio: float | None, digits: int = 1) -> str:
++    if ratio is None:
++        return "n/a"
++    return f"{ratio * 100:+.{digits}f}%"
++
++
++def format_rate(ratio: float, digits: int = 2) -> str:
++    return f"{ratio * 100:.{digits}f}%"
++
++
++# -- report ----------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class WeeklyReport:
++    week_of: date
++    revenue: float
++    revenue_change: float | None
++    orders: int
++    conversion: float
++    average_order_value: float
++    trend_window: int
++    trend: list[float]
++    best_day: date | None
++    unusual_days: list[date]
++
++
++def build_report(points: list[DailyPoint], trend_window: int = 7) -> WeeklyReport:
++    """Summarize the latest week, compared with the week before it."""
++    days = fill_missing_days(points)
++    weeks = list(weekly_totals(days).values())
++    if len(weeks) < 2:
++        raise ValueError("need at least two weeks of data")
++    previous, current = weeks[-2], weeks[-1]
++    in_week = [p for p in days if week_start(p.day) == current.day]
++    revenue = [p.revenue for p in days]
++    unusual = set(outliers(revenue))
++    top = best_day(in_week)
++    return WeeklyReport(
++        week_of=current.day,
++        revenue=current.revenue,
++        revenue_change=percent_change(previous.revenue, current.revenue),
++        orders=current.orders,
++        conversion=conversion_rate(current),
++        average_order_value=average_order_value(current),
++        trend_window=trend_window,
++        trend=moving_average(revenue, trend_window),
++        best_day=top.day if top else None,
++        unusual_days=[p.day for p in in_week if p.revenue in unusual],
++    )
++
++
++def render_report(report: WeeklyReport) -> str:
++    lines = [
++        f"Week of {report.week_of.isoformat()}",
++        f"Revenue: {format_money(report.revenue)} ({format_change(report.revenue_change)} vs last week)",
++        f"Orders: {report.orders}",
++        f"Conversion: {format_rate(report.conversion)}",
++        f"Average order: {format_money(report.average_order_value)}",
++    ]
++    if report.trend:
++        lines.append(f"{report.trend_window}-day average revenue: {format_money(report.trend[-1])}")
++    if report.best_day:
++        lines.append(f"Best day: {report.best_day.strftime('%A %d %b')}")
++    if report.unusual_days:
++        days = ", ".join(d.isoformat() for d in report.unusual_days)
++        lines.append(f"Unusual revenue on: {days}")
++    return "\n".join(lines)

@@ -1,0 +1,295 @@
+@@ -0,0 +1,294 @@
++"""Order lifecycle: create, edit, pay, ship, cancel, and refund orders."""
++
++from __future__ import annotations
++
++import logging
++from dataclasses import dataclass, field
++from datetime import datetime, timezone
++from decimal import ROUND_HALF_UP, Decimal
++from enum import Enum
++
++log = logging.getLogger(__name__)
++
++CENT = Decimal("0.01")
++MAX_LINES_PER_ORDER = 100
++MAX_QUANTITY_PER_LINE = 999
++MAX_DISCOUNT_PERCENT = Decimal("50")
++
++
++class OrderStatus(str, Enum):
++    DRAFT = "draft"
++    SUBMITTED = "submitted"
++    PAID = "paid"
++    SHIPPED = "shipped"
++    CANCELLED = "cancelled"
++    REFUNDED = "refunded"
++
++
++class OrderError(Exception):
++    """Raised when an operation is not allowed for the order's current state."""
++
++
++@dataclass
++class OrderLine:
++    sku: str
++    name: str
++    unit_price: Decimal
++    quantity: int
++
++    @property
++    def total(self) -> Decimal:
++        return (self.unit_price * self.quantity).quantize(CENT, rounding=ROUND_HALF_UP)
++
++
++@dataclass
++class Order:
++    id: int
++    customer_id: int
++    status: OrderStatus = OrderStatus.DRAFT
++    lines: list[OrderLine] = field(default_factory=list)
++    discount_percent: Decimal = Decimal("0")
++    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
++    paid_at: datetime | None = None
++    shipped_at: datetime | None = None
++    cancelled_at: datetime | None = None
++    tracking_number: str | None = None
++    payment_reference: str | None = None
++
++    @property
++    def subtotal(self) -> Decimal:
++        return sum((line.total for line in self.lines), Decimal("0"))
++
++    @property
++    def discount(self) -> Decimal:
++        return (self.subtotal * self.discount_percent / 100).quantize(CENT, rounding=ROUND_HALF_UP)
++
++    @property
++    def total(self) -> Decimal:
++        return self.subtotal - self.discount
++
++
++def to_cents(amount: Decimal) -> int:
++    return int(amount.quantize(CENT, rounding=ROUND_HALF_UP) * 100)
++
++
++def _require(order: Order, *allowed: OrderStatus) -> None:
++    if order.status not in allowed:
++        names = ", ".join(s.value for s in allowed)
++        raise OrderError(f"order {order.id} is {order.status.value}; expected one of: {names}")
++
++
++def _now() -> datetime:
++    return datetime.now(timezone.utc)
++
++
++class OrderService:
++    def __init__(self, repo, payments, inventory, audit, mailer) -> None:
++        self.repo = repo
++        self.payments = payments
++        self.inventory = inventory
++        self.audit = audit
++        self.mailer = mailer
++
++    # -- creating and editing ------------------------------------------------
++
++    async def create(self, customer_id: int) -> Order:
++        order = await self.repo.insert(Order(id=0, customer_id=customer_id))
++        await self.audit.record(order.id, "created", {"customer_id": customer_id})
++        return order
++
++    async def get(self, order_id: int) -> Order:
++        order = await self.repo.get(order_id)
++        if order is None:
++            raise OrderError(f"order {order_id} not found")
++        return order
++
++    async def add_line(self, order_id: int, sku: str, quantity: int) -> Order:
++        if not 1 <= quantity <= MAX_QUANTITY_PER_LINE:
++            raise OrderError(f"quantity must be between 1 and {MAX_QUANTITY_PER_LINE}")
++        order = await self.get(order_id)
++        _require(order, OrderStatus.DRAFT)
++        product = await self.inventory.product(sku)
++        if product is None:
++            raise OrderError(f"unknown product {sku}")
++        for line in order.lines:
++            if line.sku == sku:
++                new_quantity = line.quantity + quantity
++                if new_quantity > MAX_QUANTITY_PER_LINE:
++                    raise OrderError(f"quantity must be at most {MAX_QUANTITY_PER_LINE}")
++                line.quantity = new_quantity
++                break
++        else:
++            if len(order.lines) >= MAX_LINES_PER_ORDER:
++                raise OrderError(f"an order can have at most {MAX_LINES_PER_ORDER} lines")
++            order.lines.append(OrderLine(sku, product.name, product.price, quantity))
++        await self.repo.save(order)
++        await self.audit.record(order.id, "line_added", {"sku": sku, "quantity": quantity})
++        return order
++
++    async def remove_line(self, order_id: int, sku: str) -> Order:
++        order = await self.get(order_id)
++        _require(order, OrderStatus.DRAFT)
++        remaining = [line for line in order.lines if line.sku != sku]
++        if len(remaining) == len(order.lines):
++            raise OrderError(f"order {order_id} has no line for {sku}")
++        order.lines = remaining
++        await self.repo.save(order)
++        await self.audit.record(order.id, "line_removed", {"sku": sku})
++        return order
++
++    async def apply_discount(self, order_id: int, percent: Decimal) -> Order:
++        if not Decimal("0") <= percent <= MAX_DISCOUNT_PERCENT:
++            raise OrderError(f"discount must be between 0 and {MAX_DISCOUNT_PERCENT} percent")
++        order = await self.get(order_id)
++        _require(order, OrderStatus.DRAFT)
++        order.discount_percent = percent
++        await self.repo.save(order)
++        await self.audit.record(order.id, "discount_applied", {"percent": str(percent)})
++        return order
++
++    # -- checkout --------------------------------------------------------------
++
++    async def submit(self, order_id: int) -> Order:
++        order = await self.get(order_id)
++        _require(order, OrderStatus.DRAFT)
++        if not order.lines:
++            raise OrderError("cannot submit an empty order")
++        for line in order.lines:
++            if not await self.inventory.reserve(line.sku, line.quantity, order.id):
++                await self.inventory.release_all(order.id)
++                raise OrderError(f"not enough stock for {line.sku}")
++        order.status = OrderStatus.SUBMITTED
++        await self.repo.save(order)
++        await self.audit.record(order.id, "submitted", {"total": str(order.total)})
++        return order
++
++    async def pay(self, order_id: int, card_token: str) -> Order:
++        order = await self.get(order_id)
++        _require(order, OrderStatus.SUBMITTED)
++        reference = await self.payments.charge(card_token, to_cents(order.total), f"order-{order.id}")
++        order.status = OrderStatus.PAID
++        order.paid_at = _now()
++        order.payment_reference = reference
++        await self.repo.save(order)
++        await self.audit.record(order.id, "paid", {"reference": reference})
++        await self.mailer.send(order.customer_id, "order-paid", {"order_id": order.id})
++        return order
++
++    # -- fulfilment ------------------------------------------------------------
++
++    async def cancel(self, order_id: int, reason: str) -> Order:
++        order = await self.get(order_id)
++        _require(order, OrderStatus.DRAFT, OrderStatus.SUBMITTED, OrderStatus.PAID)
++        if order.status in (OrderStatus.SUBMITTED, OrderStatus.PAID):
++            await self.inventory.release_all(order.id)
++        if order.status is OrderStatus.PAID:
++            await self.payments.refund(order.payment_reference, to_cents(order.total))
++        order.status = OrderStatus.CANCELLED
++        order.cancelled_at = _now()
++        await self.repo.save(order)
++        self.audit.record(order.id, "cancelled", {"reason": reason})
++        await self.mailer.send(order.customer_id, "order-cancelled", {"order_id": order.id})
++        return order
++
++    async def ship(self, order_id: int, tracking_number: str) -> Order:
++        if not tracking_number.strip():
++            raise OrderError("tracking number is required")
++        order = await self.get(order_id)
++        _require(order, OrderStatus.PAID)
++        await self.inventory.commit_all(order.id)
++        order.status = OrderStatus.SHIPPED
++        order.shipped_at = _now()
++        order.tracking_number = tracking_number.strip()
++        await self.repo.save(order)
++        await self.audit.record(order.id, "shipped", {"tracking": order.tracking_number})
++        await self.mailer.send(order.customer_id, "order-shipped", {
++            "order_id": order.id, "tracking_number": order.tracking_number,
++        })
++        return order
++
++    async def refund(self, order_id: int, amount: Decimal | None = None) -> Order:
++        order = await self.get(order_id)
++        _require(order, OrderStatus.SHIPPED)
++        refund_amount = order.total if amount is None else amount.quantize(CENT, rounding=ROUND_HALF_UP)
++        if not Decimal("0") < refund_amount <= order.total:
++            raise OrderError("refund must be positive and at most the order total")
++        await self.payments.refund(order.payment_reference, to_cents(refund_amount))
++        order.status = OrderStatus.REFUNDED
++        await self.repo.save(order)
++        await self.audit.record(order.id, "refunded", {"amount": str(refund_amount)})
++        await self.mailer.send(order.customer_id, "order-refunded", {
++            "order_id": order.id, "amount": str(refund_amount),
++        })
++        return order
++
++    # -- queries ---------------------------------------------------------------
++
++    async def for_customer(self, customer_id: int, status: OrderStatus | None = None) -> list[Order]:
++        orders = await self.repo.by_customer(customer_id)
++        if status is not None:
++            orders = [o for o in orders if o.status is status]
++        return sorted(orders, key=lambda o: o.created_at, reverse=True)
++
++    async def lifetime_value(self, customer_id: int) -> Decimal:
++        orders = await self.for_customer(customer_id)
++        counted = (OrderStatus.PAID, OrderStatus.SHIPPED)
++        return sum((o.total for o in orders if o.status in counted), Decimal("0"))
++
++    async def stale_drafts(self, older_than_days: int = 30) -> list[Order]:
++        cutoff = _now().timestamp() - older_than_days * 86_400
++        drafts = await self.repo.by_status(OrderStatus.DRAFT)
++        return [o for o in drafts if o.created_at.timestamp() < cutoff]
++
++    async def expire_stale_drafts(self, older_than_days: int = 30) -> int:
++        stale = await self.stale_drafts(older_than_days)
++        for order in stale:
++            order.status = OrderStatus.CANCELLED
++            order.cancelled_at = _now()
++            await self.repo.save(order)
++            await self.audit.record(order.id, "expired", {"days": older_than_days})
++        return len(stale)
++
++
++def format_money(amount: Decimal) -> str:
++    return f"${amount.quantize(CENT, rounding=ROUND_HALF_UP):,}"
++
++
++def receipt_lines(order: Order) -> list[str]:
++    """Plain-text receipt, one line per item plus the totals."""
++    lines = [f"Order #{order.id}", ""]
++    for line in order.lines:
++        lines.append(f"{line.quantity:>4} x {line.name:<30} {format_money(line.total):>12}")
++    lines.append("")
++    lines.append(f"{'Subtotal':<37} {format_money(order.subtotal):>12}")
++    if order.discount:
++        lines.append(f"{'Discount':<37} {'-' + format_money(order.discount):>12}")
++    lines.append(f"{'Total':<37} {format_money(order.total):>12}")
++    return lines
++
++
++def summarize(order: Order) -> dict:
++    """A JSON-friendly view of an order for the API."""
++    return {
++        "id": order.id,
++        "customer_id": order.customer_id,
++        "status": order.status.value,
++        "lines": [
++            {
++                "sku": line.sku,
++                "name": line.name,
++                "unit_price": str(line.unit_price),
++                "quantity": line.quantity,
++                "total": str(line.total),
++            }
++            for line in order.lines
++        ],
++        "subtotal": str(order.subtotal),
++        "discount": str(order.discount),
++        "total": str(order.total),
++        "created_at": order.created_at.isoformat(),
++        "paid_at": order.paid_at.isoformat() if order.paid_at else None,
++        "shipped_at": order.shipped_at.isoformat() if order.shipped_at else None,
++        "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
++        "tracking_number": order.tracking_number,
++    }

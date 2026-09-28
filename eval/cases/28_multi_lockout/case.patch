@@ -1,0 +1,27 @@
+@@ -0,0 +1,26 @@
++const users = require("./users");
++const mailer = require("./mailer");
++
++const MAX_FAILED_ATTEMPTS = 5;
++
++/** Records a failed login. The 5th failed attempt in a row locks the account. */
++async function recordFailedLogin(userId) {
++  const user = await users.get(userId);
++  if (!user) {
++    throw new Error(`unknown user ${userId}`);
++  }
++  const attempts = user.failedAttempts + 1;
++  const locked = attempts > MAX_FAILED_ATTEMPTS;
++  users.update(userId, { failedAttempts: attempts, locked });
++  if (locked && !user.locked) {
++    await mailer.send(user.email, "account-locked", {});
++  }
++  return { attempts, locked };
++}
++
++/** Resets the counter after a successful login. */
++async function recordSuccessfulLogin(userId) {
++  await users.update(userId, { failedAttempts: 0 });
++}
++
++module.exports = { MAX_FAILED_ATTEMPTS, recordFailedLogin, recordSuccessfulLogin };

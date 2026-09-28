@@ -1,0 +1,29 @@
+@@ -0,0 +1,28 @@
++const db = require("./db");
++
++// Sort keys the API accepts, mapped to column names.
++const SORTABLE_COLUMNS = { date: "created_at", total: "total", customer: "customer_name" };
++const DEFAULT_LIMIT = 50;
++const MAX_LIMIT = 200;
++
++function clampLimit(limit) {
++  const parsed = Number.parseInt(limit, 10);
++  if (Number.isNaN(parsed)) {
++    return DEFAULT_LIMIT;
++  }
++  return Math.min(Math.max(parsed, 1), MAX_LIMIT);
++}
++
++async function listOrders({ sortBy = "date", direction = "desc", limit = DEFAULT_LIMIT } = {}) {
++  if (!Object.hasOwn(SORTABLE_COLUMNS, sortBy)) {
++    throw new Error(`cannot sort by ${sortBy}`);
++  }
++  const column = SORTABLE_COLUMNS[sortBy];
++  const order = direction === "asc" ? "ASC" : "DESC";
++  return db.query(
++    `SELECT id, customer_name, total, created_at FROM orders ORDER BY ${column} ${order} LIMIT $1`,
++    [clampLimit(limit)],
++  );
++}
++
++module.exports = { SORTABLE_COLUMNS, clampLimit, listOrders };

@@ -1,0 +1,38 @@
+@@ -0,0 +1,37 @@
++"""Page math for list endpoints. Pages are 1-based; item indexes are 0-based."""
++
++
++def page_count(total_items: int, per_page: int) -> int:
++    if total_items < 0 or per_page < 1:
++        raise ValueError("total_items must be >= 0 and per_page >= 1")
++    return (total_items + per_page - 1) // per_page
++
++
++def page_bounds(page: int, per_page: int) -> tuple[int, int]:
++    """Slice bounds [start, end) of a page."""
++    if page < 1 or per_page < 1:
++        raise ValueError("page and per_page must be >= 1")
++    start = (page - 1) * per_page
++    return start, start + per_page
++
++
++def page_of_item(index: int, per_page: int) -> int:
++    """The page that shows the item at a 0-based index."""
++    if index < 0 or per_page < 1:
++        raise ValueError("index must be >= 0 and per_page >= 1")
++    return index // per_page + 1
++
++
++def page_items(items: list, page: int, per_page: int) -> list:
++    start, end = page_bounds(page, per_page)
++    return items[start:end]
++
++
++def page_links(page: int, total_items: int, per_page: int) -> dict[str, int | None]:
++    last = max(page_count(total_items, per_page), 1)
++    return {
++        "first": 1,
++        "prev": page - 1 if page > 1 else None,
++        "next": page + 1 if page < last else None,
++        "last": last,
++    }

@@ -1,0 +1,55 @@
+@@ -0,0 +1,54 @@
++"""Import product rows from a supplier CSV into the catalog."""
++
++import csv
++import logging
++from decimal import Decimal, InvalidOperation
++from pathlib import Path
++
++log = logging.getLogger(__name__)
++
++REQUIRED_COLUMNS = {"sku", "name", "price"}
++
++
++class RowError(ValueError):
++    """A row that can't be imported; the message says which row and why."""
++
++
++def parse_price(raw: str, row_number: int) -> Decimal:
++    try:
++        price = Decimal(raw.strip())
++    except InvalidOperation:
++        raise RowError(f"row {row_number}: price {raw!r} is not a number") from None
++    if price < 0:
++        raise RowError(f"row {row_number}: price can't be negative")
++    return price
++
++
++def parse_row(row: dict, row_number: int) -> dict:
++    sku = (row.get("sku") or "").strip()
++    name = (row.get("name") or "").strip()
++    if not sku or not name:
++        raise RowError(f"row {row_number}: sku and name are required")
++    return {"sku": sku, "name": name, "price": parse_price(row.get("price") or "", row_number)}
++
++
++def read_rows(path: Path) -> list[dict]:
++    with path.open(newline="", encoding="utf-8") as f:
++        reader = csv.DictReader(f)
++        missing = REQUIRED_COLUMNS - set(reader.fieldnames or [])
++        if missing:
++            raise RowError(f"missing columns: {', '.join(sorted(missing))}")
++        return [parse_row(row, n) for n, row in enumerate(reader, start=2)]
++
++
++def import_catalog(path: Path, catalog) -> int:
++    """Import every row, or nothing: a bad file is logged with its path and the error is re-raised."""
++    try:
++        rows = read_rows(path)
++    except Exception:
++        log.exception("catalog import failed for %s", path)
++        raise
++    with catalog.transaction():
++        for row in rows:
++            catalog.upsert(row["sku"], name=row["name"], price=row["price"])
++    return len(rows)
