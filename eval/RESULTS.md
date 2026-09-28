@@ -45,6 +45,20 @@ Reading the errors found two mistakes in my own ground truth, not in DiffWarden:
 - **Decoy 21 had a real bug.** DiffWarden reported that a CSV price of `"Infinity"` passes validation, which was true: `Decimal("Infinity")` parses and isn't negative. The decoy was fixed to reject non-finite prices and that case was re-run.
 - **Case 27's bug ranges were too narrow.** DiffWarden reported the `None` access where `fetchone()` can return `None` and the leak where the function returns without closing the connection, both sensible places. The ranges were widened to cover those lines, and matching was made one-to-one, which also removed an earlier overcount on case 28.
 
+## Webhook response time on Vercel
+
+Checked from the GitHub App's delivery log (`GET /app/hook/deliveries`) for every `pull_request` event sent to the Vercel deployment on 2026-09-27:
+
+| PR event | Response | Time until GitHub got the response | Review posted |
+|---|---|---|---|
+| #4 opened | `202` | 0.22 s | 7 s after delivery |
+| #5 opened | `202` | 4.51 s (cold start) | 7 s after delivery |
+| #5 synchronize | `202` | 0.14 s | no new findings, no review |
+| #6 opened | `202` | 0.19 s | 6 s after delivery |
+| #6 synchronize | `202` | 0.13 s | no new findings, no review |
+
+No delivery timed out. The response comes back well before the review is posted, which confirms that on Vercel the review runs after the `202` is sent, as in the architecture diagram. The one slow response (4.5 s) was a cold start after the function had been idle; it is still inside GitHub's 10-second limit, but it is the main risk on serverless hosting.
+
 ## Caveats
 
 - **Small and synthetic.** 28 hand-written cases, most of them short. Real PRs are larger, mix unrelated changes, and depend on code outside the diff, so these numbers are an upper bound.
