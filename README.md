@@ -159,6 +159,14 @@ tests/              pytest suite
 scripts/            manual checks (auth, one review, prompts, engine, verifier)
 ```
 
+## Security
+
+- **Webhook authenticity:** every request is checked against `X-Hub-Signature-256` (HMAC-SHA256 over the raw body, compared in constant time); unsigned or invalid requests get `401` before anything is parsed.
+- **Prompt injection:** only the diff (file paths and changed lines) is sent to Claude, never the PR title or description, and both prompts treat it as untrusted data and tell the model never to follow instructions found inside it. The model's answer is forced into a JSON schema and validated, and only comments on lines inside the diff, above the confidence threshold, and within the comment cap are posted. A crafted diff can still influence the wording of a comment, but not where or how many comments are posted.
+- **Mentions:** `@name` in comment titles and explanations is neutralized with a zero-width space, so DiffWarden can't ping users. Suggested code is left unchanged (GitHub doesn't turn `@` in code blocks into mentions, and editing it would break the code).
+- **Least privilege:** the App asks only for Pull requests (read and write) and Contents (read-only), and is installed only on the repositories it should review. It never pushes code; suggestions are applied only when a person clicks **Commit suggestion**.
+- **Secrets:** the private key, webhook secret, and API key live only in environment variables; `.env` and `*.pem` are git-ignored. Settings errors at startup name the missing variable without printing any values, and the API key is held as a `SecretStr`.
+
 ## Limitations
 
 - **Sees only the diff** and a few context lines, not the whole codebase, so bugs that depend on code elsewhere can be missed.
