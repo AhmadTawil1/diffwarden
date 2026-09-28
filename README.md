@@ -55,16 +55,24 @@ The engine subgraph has no GitHub dependency, so the eval script runs exactly th
 
 ## Results
 
-20 eval cases: 15 seeded bugs in Python and JavaScript (off-by-one, missing `await`, `None` access, SQL injection, wrong comparison, swallowed exception, unclosed connection, mutable default, wrong loop variable, integer division, missing validation, race condition, N+1 query, hard-coded secret, wrong boolean logic) and 5 clean refactors. Model `claude-sonnet-5`, one run per configuration.
+28 eval cases in Python and JavaScript: 15 seeded bugs (off-by-one, missing `await`, `None` access, SQL injection, wrong comparison, swallowed exception, unclosed connection, mutable default, wrong loop variable, integer division, missing validation, race condition, N+1 query, hard-coded secret, wrong boolean logic), 3 bugs buried in 216–294 line files, 2 diffs with two bugs each, 5 clean refactors, and 3 **decoys** (correct code that looks wrong). Model `claude-sonnet-5`; mean of 3 runs, range in brackets.
 
-| Verifier | Threshold | Recall | Precision | FP / clean case | Avg latency |
-|---|---|---|---|---|---|
-| off | 0.7 | 93% | 100% | 0.00 | 4.6s |
-| on | 0.7 | 100% | 100% | 0.00 | 6.8s |
-| on | 0.5 | 100% | 94% | 0.00 | 6.1s |
-| on | 0.8 | 80% | 100% | 0.00 | 6.1s |
+| Verifier | Threshold | Recall | Precision | FP / clean | FP / decoy | Avg latency | Avg cost / review |
+|---|---|---|---|---|---|---|---|
+| off | 0.5 | 100% | 100% | 0.00 | 0.00 | 7.2s | $0.0103 |
+| off | 0.7 | 95% (91–100%) | 100% | 0.00 | 0.00 | 7.2s | $0.0103 |
+| off | 0.8 | 77% (73–82%) | 100% | 0.00 | 0.00 | 7.2s | $0.0103 |
+| on | 0.5 | 100% | 100% | 0.00 | 0.00 | 9.2s | $0.0127 |
+| on | 0.7 | 95% (91–100%) | 100% | 0.00 | 0.00 | 9.2s | $0.0127 |
+| on | 0.8 | 77% (73–82%) | 100% | 0.00 | 0.00 | 9.2s | $0.0127 |
 
-It never commented on correct code, and 0.7 is the sweet spot: 0.5 lets in low-confidence extras (the only unmatched finding was a real edge case the test didn't plan for), while 0.8 starts dropping real bugs that the model rated 0.75–0.8. On this set the verifier added about 2 seconds per case without a measurable quality difference, because the reviewer was already precise. The set is small and easy (short files, one obvious bug each) and each configuration ran once, so treat these as upper bounds; details and error analysis are in [`eval/RESULTS.md`](eval/RESULTS.md).
+Each run reviews every case once and verifies those same findings, so the verifier and threshold rows differ only by what they filter. Three results stand out:
+
+- **The verifier had no effect here.** It kept all 74 findings across 3 runs, adding about 2 seconds and 24% cost per review. The reviewer produced no false positives, even on the decoys, so there was nothing to remove. It stays in the pipeline (switchable with `VERIFY_FINDINGS`) as a guard for noisier real-world diffs, where it hasn't been measured yet.
+- **Every bug was found; confidence is what loses them.** At 0.5 recall is 100% with no precision cost; the misses at 0.7 are real bugs the model rated 0.6. The default stays at 0.7 until that is confirmed on real PRs.
+- **Reading the errors fixed my ground truth.** One "false positive" on a decoy was a real bug in the decoy (it accepted a price of `"Infinity"`), and one case's line ranges were too narrow. Both were corrected and re-scored.
+
+The set is small and synthetic, so treat these numbers as an upper bound; full method and error analysis are in [`eval/RESULTS.md`](eval/RESULTS.md).
 
 End-to-end on GitHub, the deployed app was checked on real PRs: a planted bug gets a comment on the exact line, **Commit suggestion** applies a correct fix, unrelated pushes don't repeat comments, only new bugs are posted on later pushes, and clean PRs get no review.
 

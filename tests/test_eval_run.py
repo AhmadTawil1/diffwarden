@@ -142,3 +142,14 @@ def test_rescoring_saved_runs_needs_no_api(tmp_path, monkeypatch):
     row = next(r for r in summary["rows"] if r["verifier"])
     assert row["summary"]["recall"] == {"mean": 0.5, "min": 0.0, "max": 1.0}
     assert (tmp_path / "stamp-summary.json").exists()
+
+
+def test_one_comment_cannot_count_for_two_overlapping_bugs():
+    two = {"path": "app/items.py", "bugs": [{"start": 11, "end": 19, "category": "bug"},
+                                            {"start": 10, "end": 22, "category": "bug"}]}
+    assert match_findings([finding(line=11)], two)[1] == [True, False]
+    assert match_findings([finding(line=11), finding(line=22)], two)[1] == [True, True]
+    # the pairing is optimal: a finding only the first bug accepts still frees the other
+    narrow = {"path": "app/items.py", "bugs": [{"start": 10, "end": 10, "category": "bug"},
+                                               {"start": 10, "end": 30, "category": "bug"}]}
+    assert match_findings([finding(line=25), finding(line=10)], narrow)[1] == [True, True]

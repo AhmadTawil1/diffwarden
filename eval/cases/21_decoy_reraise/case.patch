@@ -20,8 +20,8 @@
 +        price = Decimal(raw.strip())
 +    except InvalidOperation:
 +        raise RowError(f"row {row_number}: price {raw!r} is not a number") from None
-+    if price < 0:
-+        raise RowError(f"row {row_number}: price can't be negative")
++    if not price.is_finite() or price < 0:
++        raise RowError(f"row {row_number}: price must be a non-negative number")
 +    return price
 +
 +

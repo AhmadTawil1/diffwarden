@@ -63,10 +63,27 @@ def matches(f: Finding, path: str, bug: dict) -> bool:
 
 
 def match_findings(findings: list[Finding], truth: dict) -> tuple[list[bool], list[bool]]:
-    """(does each finding hit some bug, was each bug hit by some finding)."""
+    """(does each finding hit some bug, was each bug found).
+
+    A bug counts as found only through a one-to-one pairing of findings to bugs, so a single
+    comment can't satisfy two nearby bugs at once.
+    """
     planted = bugs(truth)
     hits = [[matches(f, truth["path"], b) for b in planted] for f in findings]
-    return [any(h) for h in hits], [any(h[i] for h in hits) for i in range(len(planted))]
+    owner: dict[int, int] = {}  # bug index -> finding index (maximum bipartite matching)
+
+    def assign(fi: int, seen: set[int]) -> bool:
+        for bi, ok in enumerate(hits[fi]):
+            if ok and bi not in seen:
+                seen.add(bi)
+                if bi not in owner or assign(owner[bi], seen):
+                    owner[bi] = fi
+                    return True
+        return False
+
+    for fi in range(len(findings)):
+        assign(fi, set())
+    return [any(h) for h in hits], [bi in owner for bi in range(len(planted))]
 
 
 def keep(findings: list[Finding], patch: str, threshold: float) -> list[Finding]:
@@ -244,10 +261,33 @@ def report(runs: list[list[dict]], cases: list[dict], thresholds: list[float], s
     return summary
 
 
-async def main(runs: int, thresholds: list[float], max_cost: float, from_stamp: str | None) -> dict:
+async def rerun_cases(stamp: str, names: list[str], max_cost: float, cases: list[dict]) -> None:
+    """Re-run only some cases inside saved runs (e.g. after fixing a case) and save them in place."""
+    by_name = {c["name"]: c for c in cases}
+    unknown = [n for n in names if n not in by_name]
+    if unknown:
+        raise SystemExit(f"unknown case(s): {', '.join(unknown)}")
+    reviewer = build_engine(use_verifier=False)
+    budget = {"spent": 0.0, "max": max_cost}
+    limit = asyncio.Semaphore(PARALLEL)
+    for path in sorted(RESULTS_DIR.glob(f"{stamp}-run*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        fresh = await asyncio.gather(*(review_case(reviewer, by_name[n], limit, budget) for n in names))
+        replaced = {c["case"]: c for c in fresh}
+        data["cases"] = [replaced.get(c["case"], c) for c in data["cases"]]
+        data.setdefault("rerun", []).extend(names)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        print(f"re-ran {', '.join(names)} in {path.name}")
+    print(f"re-run API cost: ${budget['spent']:.4f}")
+
+
+async def main(runs: int, thresholds: list[float], max_cost: float, from_stamp: str | None,
+               rerun: list[str] | None = None) -> dict:
     RESULTS_DIR.mkdir(exist_ok=True)
     cases = load_cases()
     if from_stamp:
+        if rerun:
+            await rerun_cases(from_stamp, rerun, max_cost, cases)
         stamp, saved = from_stamp, load_runs(from_stamp)
     else:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -265,6 +305,10 @@ if __name__ == "__main__":
                         help="stop starting new cases once this many USD are spent (default 1.00)")
     parser.add_argument("--from", dest="from_stamp", metavar="STAMP",
                         help="re-score saved runs eval/results/STAMP-run*.json (no API calls)")
+    parser.add_argument("--rerun", nargs="+", metavar="CASE",
+                        help="with --from: re-run only these cases in the saved runs (costs API credit)")
     args = parser.parse_args()
+    if args.rerun and not args.from_stamp:
+        parser.error("--rerun needs --from STAMP")
     logging.basicConfig(level=logging.WARNING)
-    asyncio.run(main(args.runs, args.thresholds, args.max_cost, args.from_stamp))
+    asyncio.run(main(args.runs, args.thresholds, args.max_cost, args.from_stamp, args.rerun))
